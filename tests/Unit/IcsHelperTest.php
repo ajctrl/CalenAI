@@ -42,6 +42,20 @@ class IcsHelperTest extends TestCase {
 		$this->assertSame(self::TIMED + ['uid' => 'uid-1', 'hasAttendees' => false], $parsed);
 	}
 
+	public function testLongUnicodeTitleSurvivesCalendarSerializationAndEditing(): void {
+		$timezone = new DateTimeZone('Asia/Tokyo');
+		$title = str_repeat('会議📅', 20);
+		$event = ['title' => $title] + self::TIMED;
+		$ics = IcsHelper::build('folded-title', $event, $timezone, self::now());
+		$updated = IcsHelper::apply($ics, ['location' => 'Room B'], ['location'], $timezone, self::now());
+
+		$this->assertNotNull($updated);
+		$this->assertTrue(mb_check_encoding($updated, 'UTF-8'));
+		$parsed = IcsHelper::parse($updated, $timezone);
+		$this->assertSame($title, $parsed['title']);
+		$this->assertSame('Room B', $parsed['location']);
+	}
+
 	public function testBuildAllDayEventUsesExclusiveEndDate(): void {
 		$event = ['title' => '出張', 'start' => '2026-11-20', 'end' => '2026-11-21', 'allDay' => true, 'location' => '', 'description' => ''];
 		$ics = IcsHelper::build('uid-2', $event, new DateTimeZone('Asia/Tokyo'), self::now());
