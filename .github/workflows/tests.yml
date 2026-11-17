@@ -36,17 +36,29 @@ jobs:
         run: |
           mkdir "$RUNNER_TEMP/calenai"
           git archive HEAD appinfo css img js lib templates | tar -x -C "$RUNNER_TEMP/calenai"
+          cat > "$RUNNER_TEMP/provision.sh" <<'SH'
+          #!/bin/sh
+          set -eu
+          php occ app:enable calenai
+          OC_PASS='Alice-CalenAI-test!1' php occ user:add --password-from-env alice
+          OC_PASS='Bob-CalenAI-test!1' php occ user:add --password-from-env bob
+          SH
+          chmod 755 "$RUNNER_TEMP/provision.sh"
           docker run -d --name calenai-nc -p 127.0.0.1:8080:80 \
             --add-host=host.docker.internal:host-gateway \
             -v "$RUNNER_TEMP/calenai:/var/www/html/custom_apps/calenai" \
+            -v "$RUNNER_TEMP/provision.sh:/docker-entrypoint-hooks.d/post-installation/provision.sh:ro" \
             -e SQLITE_DATABASE=nextcloud -e NEXTCLOUD_ADMIN_USER=admin \
             -e NEXTCLOUD_ADMIN_PASSWORD='Adm1n-CalenAI-test!' \
             -e NEXTCLOUD_TRUSTED_DOMAINS=localhost nextcloud:35
           curl --retry 90 --retry-delay 2 --retry-all-errors -fsS http://localhost:8080/status.php
-          docker exec -u www-data calenai-nc php occ app:enable calenai
-          docker exec -u www-data -e OC_PASS='Alice-CalenAI-test!1' calenai-nc php occ user:add --password-from-env alice
-          docker exec -u www-data -e OC_PASS='Bob-CalenAI-test!1' calenai-nc php occ user:add --password-from-env bob
       - name: Run calendar scenarios with a local AI fixture
         run: |
           python3 tests/e2e/mock_ai.py 8765 tests/e2e/requests.jsonl &
           python3 tests/e2e/run.py tests/e2e
+      - name: Diagnose Nextcloud startup
+        if: failure()
+        run: |
+          docker logs --tail 60 calenai-nc
+          docker exec -u www-data calenai-nc php occ app:list --enabled
+          docker exec -u www-data calenai-nc php occ router:list calenai
