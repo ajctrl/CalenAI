@@ -17,7 +17,7 @@
     <author>CalenAI</author>
     <namespace>CalenAI</namespace>
     <category>organization</category>
-    <bugs>https://example.com/calenai/issues</bugs>
+    <bugs>https://github.com/ajctrl/CalenAI/issues</bugs>
     <dependencies>
         <php min-version="8.2"/>
         <nextcloud min-version="35" max-version="35"/>
