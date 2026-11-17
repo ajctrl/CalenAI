@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+output=$(realpath -m "${1:?Usage: package-release OUTPUT_DIRECTORY}")
+cd "$(git rev-parse --show-toplevel)"
+version=$(git show HEAD:appinfo/info.xml | python3 -c '
+import sys
+import xml.etree.ElementTree as ET
+print(ET.parse(sys.stdin).findtext("version"))
+')
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Invalid app version: $version" >&2; exit 1; }
+
+mkdir -p "$output"
+archive="calenai-$version.tar.gz"
+git archive --format=tar.gz --prefix=calenai/ -o "$output/$archive" HEAD appinfo css img js lib templates
+cd "$output"
+sha256sum "$archive" > SHA256SUMS
+printf '%s\n' "$version"
