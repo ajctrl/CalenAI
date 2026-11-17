@@ -1,0 +1,32 @@
+{
+	"name": "calenai/calenai",
+	"description": "Nextcloud app: add calendar events by writing a sentence, parsed by AI",
+	"type": "project",
+	"license": "AGPL-3.0-or-later",
+	"require": {
+		"php": ">=8.2"
+	},
+	"require-dev": {
+		"nextcloud/ocp": "dev-stable35",
+		"phpunit/phpunit": "^11.5",
+		"sabre/vobject": "^4.5"
+	},
+	"autoload": {
+		"psr-4": {
+			"OCA\\CalenAI\\": "lib/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"OCA\\CalenAI\\Tests\\": "tests/",
+			"OCP\\": "vendor/nextcloud/ocp/OCP/"
+		}
+	},
+	"scripts": {
+		"lint": "find lib templates tests -name '*.php' -print0 | xargs -0 -n1 php -l",
+		"test": "phpunit -c phpunit.xml"
+	},
+	"config": {
+		"sort-packages": true
+	}
+}

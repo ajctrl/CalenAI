@@ -1,0 +1,5 @@
+vendor/
+.phpunit.cache/
+.phpunit.result.cache
+tests/e2e/requests.jsonl
+__pycache__/

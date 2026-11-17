@@ -1,0 +1,35 @@
+<?xml version="1.0"?>
+<info xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:noNamespaceSchemaLocation="https://apps.nextcloud.com/schema/apps/info.xsd">
+    <id>calenai</id>
+    <name>CalenAI</name>
+    <summary>文章で入力するだけで、AIが予定をカレンダーに登録します</summary>
+    <description><![CDATA[「来週火曜15時から1時間 田中さんと打合せ @会議室A」のように入力すると、AIが解析してすぐにカレンダーへ保存します。
+
+- 作成は確認なしで即保存
+- 「いや16時だった」「場所は会議室B」と入力するだけで直前の予定を修正（1段階だけ元に戻せます）
+- 削除のときだけ確認を表示
+- カレンダーアプリの画面右下の「AI」ボタンからも同じ入力ができ、登録した予定はすぐ予定表に出ます
+- カレンダーごとに「ここに入れるもの」を書いておくと、内容に合うカレンダーへ自動で振り分け（使わない設定も可能）。別のカレンダーへの移動もできます
+- AI API（Anthropic / OpenAI互換 / Azure OpenAI）は管理画面で切り替え]]></description>
+    <version>1.2.7</version>
+    <licence>agpl</licence>
+    <author>CalenAI</author>
+    <namespace>CalenAI</namespace>
+    <category>organization</category>
+    <bugs>https://example.com/calenai/issues</bugs>
+    <dependencies>
+        <php min-version="8.2"/>
+        <nextcloud min-version="35" max-version="35"/>
+    </dependencies>
+    <navigations>
+        <navigation>
+            <name>AI予定追加</name>
+            <route>calenai.page.index</route>
+            <icon>app.svg</icon>
+        </navigation>
+    </navigations>
+    <settings>
+        <admin>OCA\CalenAI\Settings\AdminSettings</admin>
+    </settings>
+</info>

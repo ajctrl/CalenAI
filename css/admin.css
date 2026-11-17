@@ -1,0 +1,95 @@
+/* CalenAI — 管理画面 */
+
+.calenai-admin__form {
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	max-width: 640px;
+	margin-top: 12px;
+}
+
+.calenai-admin__row {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.calenai-admin__row[hidden] {
+	display: none;
+}
+
+.calenai-admin__row > label {
+	font-weight: bold;
+}
+
+.calenai-admin__row input[type='url'],
+.calenai-admin__row input[type='text'],
+.calenai-admin__row input[type='password'],
+.calenai-admin__row select {
+	width: 100%;
+	max-width: 640px;
+	margin: 0;
+	box-sizing: border-box;
+}
+
+.calenai-admin__help {
+	margin: 0;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--color-text-maxcontrast);
+}
+
+.calenai-admin__check {
+	display: flex;
+	align-items: flex-start;
+	gap: 6px;
+	margin: 0;
+}
+
+.calenai-admin__check[hidden] {
+	display: none;
+}
+
+.calenai-admin__actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+}
+
+.calenai-admin__actions button {
+	margin: 0;
+}
+
+.calenai-admin__status {
+	line-height: 1.5;
+}
+
+.calenai-admin__status--ok {
+	color: var(--color-success-text, var(--color-success));
+}
+
+.calenai-admin__status--error {
+	color: var(--color-error-text, var(--color-error));
+}
+
+.calenai-admin__notice {
+	max-width: 640px;
+	margin-top: 20px;
+	padding: 12px 16px;
+	border-radius: var(--border-radius-large, 10px);
+	background: var(--color-background-dark);
+}
+
+.calenai-admin__notice h3 {
+	margin: 0 0 6px;
+	font-size: 15px;
+	font-weight: bold;
+}
+
+.calenai-admin__notice ul {
+	margin: 0;
+	padding-inline-start: 20px;
+	list-style: disc;
+	line-height: 1.6;
+}
