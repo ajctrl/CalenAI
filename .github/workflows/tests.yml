@@ -31,12 +31,18 @@ jobs:
   nextcloud:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      version: ${{ steps.install.outputs.version }}
     steps:
       - uses: actions/checkout@v7.0.1
       - name: Start Nextcloud 35 with the distribution files
+        id: install
         run: |
-          mkdir "$RUNNER_TEMP/calenai"
-          git archive HEAD appinfo css img js lib templates | tar -x -C "$RUNNER_TEMP/calenai"
+          release_dir="$RUNNER_TEMP/release"
+          version=$(scripts/package-release "$release_dir")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          (cd "$release_dir" && sha256sum -c SHA256SUMS)
+          tar -xzf "$release_dir/calenai-$version.tar.gz" -C "$RUNNER_TEMP"
           cat > "$RUNNER_TEMP/provision.sh" <<'SH'
           #!/bin/sh
           set -eu
@@ -63,3 +69,39 @@ jobs:
           docker logs --tail 60 calenai-nc
           docker exec -u www-data calenai-nc php occ app:list --enabled
           docker exec -u www-data calenai-nc php occ router:list calenai
+
+  release:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [unit, nextcloud]
+    concurrency: release-${{ needs.nextcloud.outputs.version }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Publish the tested app version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          release_dir="$RUNNER_TEMP/release"
+          version=$(scripts/package-release "$release_dir")
+          tag="v$version"
+          if metadata=$(gh release view "$tag" --json isDraft,targetCommitish); then
+            if jq -e '.isDraft == false' <<< "$metadata" >/dev/null; then
+              echo "$tag is already published."
+              exit 0
+            fi
+            # Resume an interrupted upload only for this exact revision.
+            jq -e --arg sha "$GITHUB_SHA" '.targetCommitish == $sha' <<< "$metadata" >/dev/null
+          else
+            # Refuse to reuse a pre-existing tag at another commit.
+            tag_refs=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")
+            jq -e --arg ref "refs/tags/$tag" --arg sha "$GITHUB_SHA" \
+              'all(.[]; .ref != $ref or .object.sha == $sha)' <<< "$tag_refs" >/dev/null
+            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "CalenAI $version" --generate-notes
+          fi
+          cd "$release_dir"
+          gh release upload "$tag" "calenai-$version.tar.gz" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
+          gh release edit "$tag" --draft=false --repo "$GITHUB_REPOSITORY"

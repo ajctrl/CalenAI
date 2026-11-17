@@ -51,4 +51,8 @@ Choose a compatible version from [GitHub Releases](https://github.com/ajctrl/Cal
 
 Install development dependencies with `composer install`. Run `composer lint` to check PHP syntax and `composer test` to run the unit tests.
 
+## Releasing a version
+
+Set the new version in `appinfo/info.xml` in the release PR. After the change reaches `main` and the PHP and Nextcloud tests pass, GitHub Actions publishes a GitHub Release tagged `v<version>` with the app archive and `SHA256SUMS`. Merges that keep an already published app version skip publication.
+
 CalenAI is licensed under AGPL-3.0-or-later. Report bugs in [GitHub Issues](https://github.com/ajctrl/CalenAI/issues).
