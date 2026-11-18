@@ -4,13 +4,16 @@ on:
     branches: [main]
   push:
     branches: [main]
-
   schedule:
     - cron: '17 4 * * *'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+defaults:
+  run:
+    shell: bash
 
 jobs:
   unit:
