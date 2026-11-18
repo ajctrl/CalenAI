@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$PWD
+release_dir="$RUNNER_TEMP/release"
+version=$(scripts/package-release "$release_dir")
+expected=$(jq -r .version <<< "$PLAN")
+low=$(jq -r .low <<< "$PLAN")
+high=$(jq -r .high <<< "$PLAN")
+[[ "$version" == "$expected" ]]
+tag="v$version"
+archive="calenai-$version.tar.gz"
+
+cd "$release_dir"
+sha256sum -c SHA256SUMS
+python3 "$root/scripts/compatibility.py" verify "$archive" "$version" "$low" "$high"
+
+export GH_REPO="$GITHUB_REPOSITORY"
+if metadata=$(gh release view "$tag" --json isDraft,isPrerelease,targetCommitish,assets); then
+  if jq -e '.isDraft == false' <<< "$metadata" >/dev/null; then
+    jq -e '.isPrerelease == false' <<< "$metadata" >/dev/null
+    gh release download "$tag" -p "$archive" -D existing
+    python3 "$root/scripts/compatibility.py" verify "existing/$archive" "$version" "$low" "$high"
+    echo "$tag is already published."
+    exit 0
+  fi
+  jq -e --arg sha "$GITHUB_SHA" '.targetCommitish == $sha' <<< "$metadata" >/dev/null
+else
+  refs=$(gh api "repos/$GH_REPO/git/matching-refs/tags/$tag")
+  jq -e --arg ref "refs/tags/$tag" --arg sha "$GITHUB_SHA" \
+    'all(.[]; .ref != $ref or .object.sha == $sha)' <<< "$refs" >/dev/null
+  gh release create "$tag" --draft --target "$GITHUB_SHA" --title "CalenAI $version" --generate-notes
+  metadata='{"assets":[]}'
+fi
+
+for asset in "$archive" SHA256SUMS; do
+  if ! jq -e --arg name "$asset" 'any(.assets[]; .name == $name)' <<< "$metadata" >/dev/null; then
+    gh release upload "$tag" "$asset"
+  fi
+done
+# Check the actual draft attachments, including assets retained on a retry.
+gh release download "$tag" -p "$archive" -p SHA256SUMS -D uploaded
+cmp SHA256SUMS uploaded/SHA256SUMS
+cmp "$archive" "uploaded/$archive"
+python3 "$root/scripts/compatibility.py" verify "uploaded/$archive" "$version" "$low" "$high"
+gh release edit "$tag" --draft=false --prerelease=false

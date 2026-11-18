@@ -60,7 +60,7 @@ class CreatedEventMapper extends QBMapper {
 			->from($this->getTableName(), 'h')
 			->where($qb->expr()->eq('h.user_id', $qb->createNamedParameter($userId)))
 			->andWhere($qb->expr()->isNotNull('h.object_id'))
-			->andWhere($qb->expr()->notExists($hidden))
+			->andWhere($qb->createFunction('NOT EXISTS (' . $hidden->getSQL() . ')'))
 			->orderBy('h.updated_at', 'DESC')
 			->addOrderBy('h.updated_at_usec', 'DESC')
 			->addOrderBy('h.id', 'DESC')
