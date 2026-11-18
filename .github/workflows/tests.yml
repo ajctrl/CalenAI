@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -28,21 +32,66 @@ jobs:
       - run: composer lint
       - run: composer test
 
-  nextcloud:
+  discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
     outputs:
-      version: ${{ steps.install.outputs.version }}
+      plan: ${{ steps.schedule.outputs.plan }}
     steps:
       - uses: actions/checkout@v7.0.1
-      - name: Start Nextcloud 35 with the distribution files
-        id: install
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: schedule
+        name: Read Nextcloud's stable releases and check the version bump
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          curl -fsSL --retry 3 https://raw.githubusercontent.com/wiki/nextcloud/server/Maintenance-and-Release-Schedule.md -o "$RUNNER_TEMP/schedule.md"
+          args=()
+          if [[ -n "$BASE" && ! "$BASE" =~ ^0+$ ]]; then
+            git show "$BASE:appinfo/info.xml" > "$RUNNER_TEMP/base-info.xml"
+            args+=(--base-info "$RUNNER_TEMP/base-info.xml")
+          fi
+          plan=$(python3 scripts/compatibility.py plan "$RUNNER_TEMP/schedule.md" "${args[@]}")
+          echo "$plan"
+          echo "plan=$plan" >> "$GITHUB_OUTPUT"
+
+  nextcloud:
+    needs: discover
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        server: ${{ fromJSON(needs.discover.outputs.plan).matrix }}
+    env:
+      SERVER: ${{ matrix.server }}
+      PLAN: ${{ needs.discover.outputs.plan }}
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: composer:v2
+      - run: composer install --no-interaction --prefer-dist
+      - name: Install the packaged app on the selected Nextcloud release
         run: |
           release_dir="$RUNNER_TEMP/release"
           version=$(scripts/package-release "$release_dir")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
           (cd "$release_dir" && sha256sum -c SHA256SUMS)
-          tar -xzf "$release_dir/calenai-$version.tar.gz" -C "$RUNNER_TEMP"
+          archive="$release_dir/calenai-$version.tar.gz"
+          low=$(jq -r .low <<< "$PLAN")
+          high=$(jq -r .high <<< "$PLAN")
+          python3 scripts/compatibility.py verify "$archive" "$(jq -r .version <<< "$PLAN")" "$low" "$high"
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          major=${SERVER%%.*}
+          if (( major < low || major > high )); then
+            python3 scripts/compatibility.py update "$RUNNER_TEMP/calenai/appinfo/info.xml" \
+              "$(jq -r .next_version <<< "$PLAN")" "$(jq -r .minimum <<< "$PLAN")" "$(jq -r .maximum <<< "$PLAN")"
+          fi
           cat > "$RUNNER_TEMP/provision.sh" <<'SH'
           #!/bin/sh
           set -eu
@@ -53,12 +102,20 @@ jobs:
           chmod 755 "$RUNNER_TEMP/provision.sh"
           docker run -d --name calenai-nc -p 127.0.0.1:8080:80 \
             --add-host=host.docker.internal:host-gateway \
+            -v "$GITHUB_WORKSPACE:/opt/calenai-tests:ro" \
             -v "$RUNNER_TEMP/calenai:/var/www/html/custom_apps/calenai" \
             -v "$RUNNER_TEMP/provision.sh:/docker-entrypoint-hooks.d/post-installation/provision.sh:ro" \
             -e SQLITE_DATABASE=nextcloud -e NEXTCLOUD_ADMIN_USER=admin \
             -e NEXTCLOUD_ADMIN_PASSWORD='Adm1n-CalenAI-test!' \
-            -e NEXTCLOUD_TRUSTED_DOMAINS=localhost nextcloud:35
-          curl --retry 90 --retry-delay 2 --retry-all-errors -fsS http://localhost:8080/status.php
+            -e NEXTCLOUD_TRUSTED_DOMAINS=localhost "nextcloud:$SERVER-apache"
+          curl --retry 90 --retry-delay 2 --retry-all-errors -fsS http://localhost:8080/status.php |
+            jq -e --arg version "$SERVER" '.installed and .versionstring == $version'
+          docker exec -u www-data calenai-nc php occ app:list --enabled --output=json |
+            jq -e '.enabled | has("calenai")'
+      - name: Run unit tests with the installed server's public API
+        run: |
+          docker exec -w /opt/calenai-tests calenai-nc php vendor/bin/phpunit \
+            --do-not-cache-result --bootstrap tests/nextcloud-bootstrap.php
       - name: Run calendar scenarios with a local AI fixture
         run: |
           python3 tests/e2e/mock_ai.py 8765 tests/e2e/requests.jsonl &
@@ -70,10 +127,43 @@ jobs:
           docker exec -u www-data calenai-nc php occ app:list --enabled
           docker exec -u www-data calenai-nc php occ router:list calenai
 
+  propose:
+    if: >-
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main' &&
+      fromJSON(needs.discover.outputs.plan).version != fromJSON(needs.discover.outputs.plan).next_version
+    needs: [discover, unit, nextcloud]
+    runs-on: ubuntu-latest
+    concurrency: nextcloud-compatibility-pr
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+      - name: Prepare the tested compatibility change
+        env:
+          PLAN: ${{ needs.discover.outputs.plan }}
+        run: |
+          python3 scripts/compatibility.py update appinfo/info.xml "$(jq -r .next_version <<< "$PLAN")" \
+            "$(jq -r .minimum <<< "$PLAN")" "$(jq -r .maximum <<< "$PLAN")"
+      - uses: peter-evans/create-pull-request@3ffccacd46053766916f087ce41d627c0b8cf2d1 # v8
+        with:
+          base: main
+          branch: automation/nextcloud-compatibility
+          add-paths: appinfo/info.xml
+          commit-message: Update tested Nextcloud compatibility
+          title: Support Nextcloud ${{ fromJSON(needs.discover.outputs.plan).minimum }}–${{ fromJSON(needs.discover.outputs.plan).maximum }}
+          body: |
+            The install, enable, PHPUnit and calendar E2E jobs passed on ${{ join(fromJSON(needs.discover.outputs.plan).matrix, ', ') }}.
+            [Test run](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) for `${{ github.sha }}`.
+            Release version is `${{ fromJSON(needs.discover.outputs.plan).next_version }}`.
+
   release:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [unit, nextcloud]
-    concurrency: release-${{ needs.nextcloud.outputs.version }}
+    needs: [discover, unit, nextcloud]
+    concurrency: release-${{ fromJSON(needs.discover.outputs.plan).version }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -81,27 +171,8 @@ jobs:
       - uses: actions/checkout@v7.0.1
         with:
           persist-credentials: false
-      - name: Publish the tested app version
+      - name: Verify the archive and publish the tested app version
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          release_dir="$RUNNER_TEMP/release"
-          version=$(scripts/package-release "$release_dir")
-          tag="v$version"
-          if metadata=$(gh release view "$tag" --json isDraft,targetCommitish); then
-            if jq -e '.isDraft == false' <<< "$metadata" >/dev/null; then
-              echo "$tag is already published."
-              exit 0
-            fi
-            # Resume an interrupted upload only for this exact revision.
-            jq -e --arg sha "$GITHUB_SHA" '.targetCommitish == $sha' <<< "$metadata" >/dev/null
-          else
-            # Refuse to reuse a pre-existing tag at another commit.
-            tag_refs=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/tags/$tag")
-            jq -e --arg ref "refs/tags/$tag" --arg sha "$GITHUB_SHA" \
-              'all(.[]; .ref != $ref or .object.sha == $sha)' <<< "$tag_refs" >/dev/null
-            gh release create "$tag" --draft --target "$GITHUB_SHA" --title "CalenAI $version" --generate-notes
-          fi
-          cd "$release_dir"
-          gh release upload "$tag" "calenai-$version.tar.gz" SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
-          gh release edit "$tag" --draft=false --repo "$GITHUB_REPOSITORY"
+          PLAN: ${{ needs.discover.outputs.plan }}
+        run: scripts/publish-release
