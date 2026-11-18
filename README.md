@@ -13,13 +13,13 @@ You can edit or delete recent events created through CalenAI. Deletion requires 
 
 ## Install
 
-Choose a formal release whose archived `calenai/appinfo/info.xml` includes your Nextcloud major between `min-version` and `max-version`. The commands below use v1.2.7 for Nextcloud 35 as an example. Installation requires administrator access. To create an event, the user needs a writable calendar.
+Choose a formal release whose archived `calenai/appinfo/info.xml` includes your Nextcloud major between `min-version` and `max-version`. The commands below use v1.2.8, which supports Nextcloud 33–35. Installation requires administrator access. To create an event, the user needs a writable calendar.
 
-1. Download the app archive and its checksum from the same [GitHub release](https://github.com/ajctrl/CalenAI/releases/tag/v1.2.7). For example, run the following in an empty working directory.
+1. Download the app archive and its checksum from the same [GitHub release](https://github.com/ajctrl/CalenAI/releases/tag/v1.2.8). For example, run the following in an empty working directory.
 
    ```sh
-   release=https://github.com/ajctrl/CalenAI/releases/download/v1.2.7
-   curl -fLO "$release/calenai-1.2.7.tar.gz" &&
+   release=https://github.com/ajctrl/CalenAI/releases/download/v1.2.8
+   curl -fLO "$release/calenai-1.2.8.tar.gz" &&
      curl -fLO "$release/SHA256SUMS" &&
      sha256sum -c SHA256SUMS
    ```
@@ -27,7 +27,7 @@ Choose a formal release whose archived `calenai/appinfo/info.xml` includes your 
 2. For a first install, extract the archive into your Nextcloud custom apps directory. Adjust the path to match your installation.
 
    ```sh
-   tar -xzf calenai-1.2.7.tar.gz -C /var/www/html/custom_apps
+   tar -xzf calenai-1.2.8.tar.gz -C /var/www/html/custom_apps
    ```
 
    The resulting path should be `custom_apps/calenai/appinfo/info.xml`. Ensure the Nextcloud web server user can read the files.

@@ -44,6 +44,7 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - run: python3 -m unittest discover -s tests -p test_compatibility.py
       - id: schedule
         name: Read Nextcloud's stable releases and check the version bump
         env:
