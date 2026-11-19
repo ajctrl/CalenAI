@@ -51,15 +51,14 @@ class Handler(BaseHTTPRequestHandler):
             # 転送を返す。クライアントがたどると、転送先（/v1/...）へのリクエストがログに残る
             self.send_response(307); self.send_header('Location', 'http://' + self.headers['Host'] + self.path[len('/redirect'):]); self.send_header('Content-Length', '0'); self.end_headers()
             return
+        prompt = body['messages'][-1]['content']
         if self.path.startswith('/v1/messages'):
-            prompt = body['messages'][0]['content']
             if '認証エラー' in prompt:
                 return self.reply(401, {'type': 'error', 'error': {'type': 'authentication_error', 'message': 'bad key'}})
             if '拒否して' in prompt:
                 return self.reply(200, {'stop_reason': 'refusal', 'content': []})
             self.reply(200, {'stop_reason': 'end_turn', 'content': [{'type': 'thinking', 'thinking': ''}, {'type': 'text', 'text': json.dumps(decide(prompt), ensure_ascii=False)}]})
         else:
-            prompt = body['messages'][1]['content']
             self.reply(200, {'choices': [{'finish_reason': 'stop', 'message': {'role': 'assistant', 'content': json.dumps(decide(prompt), ensure_ascii=False)}}]})
     def reply(self, status, data):
         raw = json.dumps(data, ensure_ascii=False).encode()

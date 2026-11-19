@@ -252,6 +252,23 @@ class MessageInterpreterTest extends TestCase {
 
 	// ---- AI に渡す内容
 
+	public function testHistoryLengthLimitAppliesToPreviousTurnsOnly(): void {
+		$history = [
+			['role' => 'user', 'content' => str_repeat('明', 6000)],
+			['role' => 'assistant', 'content' => str_repeat('📅', 6000)],
+		];
+		$now = new DateTimeImmutable();
+		$tz = new DateTimeZone('Asia/Tokyo');
+		$prompts = [];
+		$interpreter = $this->interpreter(AiConfig::CANDIDATES_ALWAYS, [self::raw(['action' => 'unclear'])], $prompts);
+		$interpreter->interpret('次の予定', fn () => [], $now, $tz, [], $history);
+
+		$history[1]['content'] .= '。';
+		$this->expectException(ServiceException::class);
+		$this->expectExceptionMessage('「会話をリセット」');
+		$interpreter->interpret('次の予定', fn () => self::fail('上限超過時は候補を取得しない'), $now, $tz, [], $history);
+	}
+
 	public function testUserPromptContainsDateWeekdayTimezoneAndNumberedCandidates(): void {
 		$now = new DateTimeImmutable('2026-11-16T05:05:00Z');
 		$prompt = MessageInterpreter::userPrompt('いや11時だった', self::CANDIDATES, $now, new DateTimeZone('Asia/Tokyo'));
@@ -323,6 +340,31 @@ class MessageInterpreterTest extends TestCase {
 		$this->assertCount(1, $prompts);
 		$this->assertStringNotContainsString('歯医者 |', $prompts[0]);
 		$this->assertStringNotContainsString('出張', $prompts[0]);
+	}
+
+	public function testOnDemandWithholdsCardHistoryUntilTheTargetLookup(): void {
+		$chat = ['role' => 'user', 'content' => '予定を変更したい'];
+		$card = ['source' => 'card', 'role' => 'user', 'content' => '非公開の予定'];
+		$legacyCard = ['role' => 'user', 'content' => '[カード操作結果] 削除をキャンセルした予定：秘密'];
+		$saved = ['role' => 'assistant', 'content' => '[updated] 秘密の面談を変更しました', 'savedEvent' => "\n保存した予定: 秘密の面談 | 2026-11-22T10:00"];
+		$legacySaved = ['role' => 'assistant', 'content' => "[created] 登録しました\n保存した予定: 過去の予定"];
+		$question = ['role' => 'assistant', 'source' => 'candidates', 'content' => '[unclear] 秘密の面談は何時ですか？'];
+		$history = [$card, $chat, $legacyCard, $saved, $legacySaved, $question];
+		$seen = [];
+		$config = $this->createStub(AiConfig::class);
+		$config->method('getCandidateMode')->willReturn(AiConfig::CANDIDATES_ON_DEMAND);
+		$client = $this->createMock(AiClient::class);
+		$client->expects($this->exactly(2))->method('completeJson')->willReturnCallback(
+			function ($system, $user, $schema, $name, $turns) use (&$seen) {
+				$seen[] = $turns;
+				return self::raw(['action' => 'delete', 'targetRef' => 1]);
+			}
+		);
+		$interpreter = new MessageInterpreter($client, $config);
+		$interpreter->interpret('それを消して', fn () => self::CANDIDATES, new DateTimeImmutable(), new DateTimeZone('UTC'), [], $history);
+		$this->assertSame([$chat, ['role' => 'assistant', 'content' => '[updated]'], ['role' => 'assistant', 'content' => '[created]'], ['role' => 'assistant', 'content' => '[unclear]']], $seen[0]);
+		$history[3]['content'] .= $saved['savedEvent'];
+		$this->assertSame($history, $seen[1]);
 	}
 
 	public function testOnDemandConflictingActionsRequireClarification(): void {

@@ -76,6 +76,30 @@ class AiClientTest extends TestCase {
 		]);
 	}
 
+	public function testFollowUpIncludesConversationInOrderForEveryProvider(): void {
+		$history = [
+			['role' => 'user', 'content' => "OPENAIアップグレード警戒\n11月22日（日） 夜"],
+			['role' => 'assistant', 'content' => '開始日時がわかりませんでした。'],
+		];
+		foreach ([AiConfig::PROVIDER_ANTHROPIC, AiConfig::PROVIDER_OPENAI, AiConfig::PROVIDER_AZURE] as $provider) {
+			$anthropic = $provider === AiConfig::PROVIDER_ANTHROPIC;
+			$response = $anthropic ? self::anthropicOk() : '{"choices":[{"message":{"content":"{\"action\":\"unclear\"}"}}]}';
+			$client = $this->client(['provider' => $provider], 200, $response);
+			$config = $this->createStub(AiConfig::class);
+			$interpreter = new MessageInterpreter($client, $config);
+			$interpreter->interpret('夜間', fn () => [], new \DateTimeImmutable(), new \DateTimeZone('Asia/Tokyo'), [], $history);
+			$request = end($this->requests);
+			$messages = json_decode($request['options']['body'], true)['messages'];
+			if (!$anthropic) {
+				$this->assertSame('system', array_shift($messages)['role']);
+			}
+			$current = array_pop($messages);
+			$this->assertSame($history, $messages);
+			$this->assertSame('user', $current['role']);
+			$this->assertStringEndsWith("<<<\n夜間\n>>>", $current['content']);
+		}
+	}
+
 	public function testAnthropicRequestShape(): void {
 		$result = $this->complete($this->client([], 200, self::anthropicOk()));
 		$this->assertSame(['action' => 'unclear'], $result);

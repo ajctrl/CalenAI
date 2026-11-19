@@ -28,6 +28,7 @@
 	const formEl = document.getElementById('calenai-form')
 	const inputEl = document.getElementById('calenai-input')
 	const sendEl = document.getElementById('calenai-send')
+	const resetEl = document.getElementById('calenai-reset')
 	const calendarEl = document.getElementById('calenai-calendar')
 	const timezoneEl = document.getElementById('calenai-timezone')
 
@@ -147,8 +148,24 @@
 		logEl.scrollTop = logEl.scrollHeight
 	}
 
+	let conversation = []
+	let historyRequest = 0
+	let eventVersion = 0
+	let recentEntry = null
+	let effectiveTimezone = timezone || 'UTC'
+	const MAX_HISTORY_LENGTH = 12000
+
 	/** 利用者の入力を右側に出す */
 	function addUserEntry(text) {
+		const instant = new Date()
+		let localTime
+		try {
+			localTime = instant.toLocaleString('sv-SE', { timeZone: effectiveTimezone })
+		} catch (err) {
+			// The server may support a timezone name that the browser does not recognize.
+			localTime = instant.toISOString()
+		}
+		conversation.push({ role: 'user', content: '[' + localTime + ' ' + effectiveTimezone + ']\n' + text })
 		const entry = el('div', 'calenai-entry calenai-entry--user')
 		entry.appendChild(el('div', 'calenai-bubble', text))
 		logEl.appendChild(entry)
@@ -201,6 +218,10 @@
 		routingToggle.setAttribute('aria-controls', 'calenai-routing')
 		settings.appendChild(routingToggle)
 		header.appendChild(settings)
+		const reset = button('会話をリセット', null, resetConversation)
+		reset.id = 'calenai-reset'
+		reset.title = '次の入力から新しい会話を始めます'
+		header.appendChild(reset)
 		if (embedded) {
 			const close = button('×', 'calenai__close', closePanel)
 			close.title = '閉じる'
@@ -389,6 +410,7 @@
 
 	/** 予定を作成・修正・削除した後に呼ぶ */
 	function eventsChanged() {
+		eventVersion++
 		if (!embedded || refreshHostCalendar() || slowRefreshNoticed) {
 			return
 		}
@@ -620,6 +642,7 @@
 				error.hidden = false
 				return
 			}
+			const history = conversation
 			save.disabled = true
 			cancel.disabled = true
 			error.hidden = true
@@ -651,6 +674,10 @@
 					revision: event.revision,
 					timezone,
 				})
+				if (isPreviousConversation(history, true)) {
+					return
+				}
+				recordCardAction(history, '修正後の予定', result.event)
 				if (result.changes.length === 0) {
 					card.calenaiEvent = result.event
 					renderCardView(card)
@@ -662,7 +689,7 @@
 				eventsChanged()
 				scrollToBottom()
 			} catch (err) {
-				if (handleStaleEvent(card, err)) {
+				if (handleStaleEvent(card, err, history)) {
 					return
 				}
 				save.disabled = false
@@ -682,8 +709,8 @@
 	 * 予定が外部で消された（404）・変更された（409）ときの共通処理。
 	 * @return {boolean} ここで処理したら true
 	 */
-	function handleStaleEvent(card, err, id = card.calenaiEvent.id) {
-		if (showPartialResult(err)) {
+	function handleStaleEvent(card, err, history, id = card.calenaiEvent.id) {
+		if (isPreviousConversation(history, true) || showPartialResult(err, history)) {
 			return true
 		}
 		if (err.status === 404) {
@@ -708,10 +735,11 @@
 	 * 内容は保存できたが、カレンダーの移動だけ失敗したとき。保存後の予定をカードに出して、画面を実物に合わせる。
 	 * @return {boolean} ここで処理したら true
 	 */
-	function showPartialResult(err) {
+	function showPartialResult(err, history) {
 		if (!err.data || err.data.partial !== true || !err.data.event) {
 			return false
 		}
+		recordCardAction(history, '一部を保存した後の予定', err.data.event)
 		const entry = addSystemEntry(err.message, 'error')
 		entry.appendChild(createCard(err.data.event))
 		eventsChanged()
@@ -720,10 +748,15 @@
 	}
 
 	async function undoEvent(card) {
+		const history = conversation
 		const event = card.calenaiEvent
 		setCardBusy(card, true)
 		try {
 			const result = await api('POST', '/events/' + event.id + '/undo', { timezone, revision: event.revision })
+			if (isPreviousConversation(history, true)) {
+				return
+			}
+			recordCardAction(history, '修正を取り消した後の予定', result.event)
 			const entry = addSystemEntry('直前の修正を元に戻しました。')
 			if (result.changes.length > 0) {
 				entry.appendChild(changesBlock(result.changes))
@@ -733,7 +766,7 @@
 			scrollToBottom()
 		} catch (err) {
 			setCardBusy(card, false)
-			if (!handleStaleEvent(card, err)) {
+			if (!handleStaleEvent(card, err, history)) {
 				addSystemEntry(err.message, 'error')
 			}
 		}
@@ -808,11 +841,15 @@
 		})
 	}
 
-	async function confirmDelete(event) {
+	async function confirmDelete(event, history = conversation) {
 		const card = latestCards.get(event.id)
 		const text = '「' + (event.title || '（無題）') + '」（' + whenLabel(event) + '）を削除します。よろしいですか？'
 		const confirmed = await askDestructive(text, '予定の削除')
+		if (isPreviousConversation(history, false)) {
+			return
+		}
 		if (!confirmed) {
+			recordCardAction(history, '削除をキャンセルした予定', event)
 			addSystemEntry('削除をやめました。予定は残っています。')
 			inputEl.focus()
 			return
@@ -825,13 +862,17 @@
 			const query = new URLSearchParams({ revision: event.revision, timezone })
 			await api('DELETE', '/events/' + event.id + '?' + query)
 			markCardDeleted(event.id, '削除しました')
+			if (isPreviousConversation(history, true)) {
+				return
+			}
+			recordCardAction(history, '削除した予定', event)
 			addSystemEntry('「' + (event.title || '（無題）') + '」を削除しました。')
 			eventsChanged()
 		} catch (err) {
 			if (card) {
 				setCardBusy(card, false)
 			}
-			if (!handleStaleEvent(latestCards.get(event.id), err, event.id)) {
+			if (!handleStaleEvent(latestCards.get(event.id), err, history, event.id)) {
 				addSystemEntry(err.message, 'error')
 			}
 		}
@@ -840,14 +881,50 @@
 
 	// ---------------------------------------------------------------- 入力の送信
 
+	function resetConversation() {
+		conversation = []
+		addSystemEntry('ここから新しい会話です。')
+		inputEl.focus()
+	}
+
 	function setBusy(isBusy) {
 		busy = isBusy
+		resetEl.disabled = isBusy
 		sendEl.disabled = isBusy || !canWrite
 		inputEl.disabled = !canWrite
 		sendEl.textContent = isBusy ? '解析中…' : '送信'
 	}
 
-	function showResult(result) {
+	function eventSummary(event) {
+		return event.title + ' | ' + event.start + ' 〜 ' + event.end + (event.allDay ? '（終日）' : '')
+	}
+
+	// Ignore replies belonging to an earlier conversation. Reload committed changes
+	// using the active timezone rather than rendering the old response's event.
+	function isPreviousConversation(history, refresh) {
+		if (history === conversation) {
+			return false
+		}
+		if (refresh) {
+			eventsChanged()
+			loadHistory()
+		}
+		return true
+	}
+
+	function recordCardAction(history, action, event) {
+		history.push({ role: 'user', source: 'card', content: '[カード操作結果] ' + action + '：' + eventSummary(event) })
+	}
+
+	function showResult(result, history) {
+		const turn = { role: 'assistant', content: '[' + result.status + '] ' + result.reply }
+		if (result.usedCandidates) {
+			turn.source = 'candidates'
+		}
+		if (result.status === 'created' || result.status === 'updated') {
+			turn.savedEvent = '\n保存した予定: ' + eventSummary(result.event)
+		}
+		history.push(turn)
 		const entry = addSystemEntry(result.reply, result.status === 'unclear' ? 'question' : null)
 		switch (result.status) {
 		case 'created':
@@ -864,7 +941,7 @@
 		case 'confirm_delete':
 			entry.appendChild(createCard(result.event))
 			scrollToBottom()
-			confirmDelete(result.event)
+			confirmDelete(result.event, history)
 			break
 		case 'ambiguous':
 			(result.candidates || []).forEach(function(candidate) {
@@ -880,21 +957,38 @@
 		if (text === '' || busy || !canWrite) {
 			return
 		}
+		const historyLength = conversation.reduce(function(length, turn) {
+			return length + Array.from(turn.content).length + Array.from(turn.savedEvent || '').length
+		}, 0)
+		if (historyLength > MAX_HISTORY_LENGTH) {
+			addSystemEntry('会話履歴が12,000文字を超えました。「会話をリセット」を押してから再送してください。', 'question')
+			resetEl.focus()
+			return
+		}
+		const activeConversation = conversation
+		const history = activeConversation.slice()
 		inputEl.value = ''
 		addUserEntry(text)
 		const pending = addSystemEntry('解析しています…', 'pending')
 		setBusy(true)
 		try {
-			const result = await api('POST', '/message', { text, timezone })
+			const result = await api('POST', '/message', { text, timezone, history })
 			pending.remove()
-			showResult(result)
+			if (isPreviousConversation(activeConversation, result.status === 'created' || result.status === 'updated')) {
+				return
+			}
+			showResult(result, activeConversation)
 		} catch (err) {
 			pending.remove()
-			if (showPartialResult(err)) {
+			if (isPreviousConversation(activeConversation, true)) {
+				return
+			}
+			activeConversation.push({ role: 'assistant', content: err.message })
+			if (showPartialResult(err, activeConversation)) {
 				return
 			}
 			const latest = err.data && err.data.event
-			if (!latest || !handleStaleEvent(latestCards.get(latest.id), err, latest.id)) {
+			if (!latest || !handleStaleEvent(latestCards.get(latest.id), err, activeConversation, latest.id)) {
 				addSystemEntry(err.message, 'error')
 			}
 			// 失敗したときは打ち直さなくて済むように入力を戻す
@@ -937,6 +1031,7 @@
 
 	/** タイムゾーンの選択欄を、サーバーが返した状態に合わせる */
 	function renderTimezone(info) {
+		effectiveTimezone = info.effective
 		timezoneEl.textContent = ''
 		const auto = el('option', null, info.setting === '' ? '自動（' + info.effective + '）' : '自動')
 		auto.value = ''
@@ -1103,6 +1198,7 @@
 			renderTimezone(data.timezone)
 			// 表示中のカードは前のタイムゾーンの時刻なので、読み直す
 			logEl.textContent = ''
+			conversation = []
 			latestCards.clear()
 			addSystemEntry('これからは「' + data.timezone.effective + '」の時刻として日時を解釈・表示します。')
 			warnAboutMaskedTimezone(data.timezone)
@@ -1114,20 +1210,38 @@
 	})
 
 	async function loadHistory() {
+		const request = ++historyRequest
+		const version = eventVersion
 		try {
 			const data = await api('GET', '/history?timezone=' + encodeURIComponent(timezone))
-			if (data.events.length === 0) {
-				addSystemEntry('予定の内容を文章で入力してください。例:「明日10時から歯医者」「来週火曜15時から1時間 田中さんと打合せ @会議室A」')
+			if (request !== historyRequest) {
 				return
 			}
-			const entry = addSystemEntry('最近このアプリで登録した予定です。')
+			if (version !== eventVersion) {
+				return loadHistory()
+			}
+			if (recentEntry) {
+				for (const [id, card] of latestCards) {
+					if (recentEntry.contains(card)) {
+						latestCards.delete(id)
+					}
+				}
+				recentEntry.remove()
+			}
+			if (data.events.length === 0) {
+				recentEntry = addSystemEntry('予定の内容を文章で入力してください。例:「明日10時から歯医者」「来週火曜15時から1時間 田中さんと打合せ @会議室A」')
+				return
+			}
+			recentEntry = addSystemEntry('最近このアプリで登録した予定です。')
 			// 新しいものが入力欄の近く（下）に来るように、古い順に並べる
 			data.events.slice().reverse().forEach(function(event) {
-				entry.appendChild(createCard(event))
+				recentEntry.appendChild(createCard(event))
 			})
 			scrollToBottom()
 		} catch (err) {
-			addSystemEntry('最近の予定を読み込めませんでした。' + err.message, 'error')
+			if (request === historyRequest) {
+				addSystemEntry('最近の予定を読み込めませんでした。' + err.message, 'error')
+			}
 		}
 	}
 

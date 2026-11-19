@@ -339,7 +339,7 @@ check('送信内容: JSON スキーマ強制と effort', first['body'].get('outp
 check('送信内容: Anthropic 直結でないのでフォールバックは送らない', 'fallbacks' not in first['body'] and 'anthropic-beta' not in hdr)
 check('送信内容: ユーザーIDは送られない', 'alice' not in dump and 'bob' not in dump)
 check('送信内容: 場所・説明は候補に含まれない', '保険証を持参' not in dump and '| 駅前歯科' not in dump)
-check('送信内容: 候補は件名と日時', any('1. 歯医者 | ' in r['body']['messages'][0]['content'] for r in log))
+check('送信内容: 候補は件名と日時', any('1. 歯医者 | ' in r['body']['messages'][-1]['content'] for r in log))
 
 # ---- エラーの伝え方
 s, d = alice.say('認証エラーを起こして')
@@ -360,12 +360,20 @@ admin.api('PUT', '/admin/settings', dict(base, apiKey=None, candidateMode='on_de
 clear_log()
 s, d = alice.say('明日10時から歯医者')
 log = requests_log()
-check('オンデマンド: 作成は1回の呼び出しで、候補を送らない', s == 200 and d.get('status') == 'created' and len(log) == 1 and 'この段階では渡されません' in log[0]['body']['messages'][0]['content'], (s, len(log)))
+check('オンデマンド: 作成は1回の呼び出しで、候補を送らない', s == 200 and d.get('status') == 'created' and len(log) == 1 and 'この段階では渡されません' in log[0]['body']['messages'][-1]['content'], (s, len(log)))
 eid2 = d['event']['id']
 clear_log()
-s, d = alice.say('いや11時だった')
+history = [{'role': 'user', 'content': '明日10時から歯医者'},
+           {'role': 'assistant', 'content': '[created] ' + d['reply']}]
+s, d = alice.api('POST', '/message', {'text': 'いや11時だった', 'history': history, 'timezone': 'Asia/Tokyo'})
 log = requests_log()
-check('オンデマンド: 修正は2回呼び出し、候補は2回目だけ', s == 200 and d.get('status') == 'updated' and d['event']['start'] == tomorrow + 'T11:00' and len(log) == 2 and '1. 歯医者' not in log[0]['body']['messages'][0]['content'] and '1. 歯医者' in log[1]['body']['messages'][0]['content'], (s, d, len(log)))
+check('オンデマンド: 修正は2回呼び出し、候補は2回目だけ', s == 200 and d.get('status') == 'updated' and d['event']['start'] == tomorrow + 'T11:00' and len(log) == 2 and '1. 歯医者' not in log[0]['body']['messages'][-1]['content'] and '1. 歯医者' in log[1]['body']['messages'][-1]['content'], (s, d, len(log)))
+sent_histories = [request['body']['messages'][:-1] for request in log]
+expected_histories = [
+    [history[0], {'role': 'assistant', 'content': '[created]'}],
+    history,
+]
+check('オンデマンド: 履歴は発言順に届き、登録の返答全文は2回目だけ', sent_histories == expected_histories, sent_histories)
 
 # ---- OpenAI 互換の形式
 s, d = admin.api('PUT', '/admin/settings', dict(base, provider='openai', endpoint=MOCK + '/v1/chat/completions', model='mock-model', apiKey=None, candidateMode='always'))

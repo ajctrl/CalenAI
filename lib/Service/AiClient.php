@@ -37,7 +37,7 @@ class AiClient {
 	 * @return array<string, mixed>
 	 * @throws ServiceException
 	 */
-	public function completeJson(string $system, string $user, array $schema, string $schemaName): array {
+	public function completeJson(string $system, string $user, array $schema, string $schemaName, array $history = []): array {
 		$provider = $this->config->getProvider();
 		$endpoint = $this->config->getEndpoint();
 		$apiKey = $this->config->getApiKey($endpoint);
@@ -56,10 +56,16 @@ class AiClient {
 			throw ServiceException::notConfigured();
 		}
 
+		$messages = [];
+		foreach ($history as $turn) {
+			$messages[] = ['role' => $turn['role'], 'content' => $turn['content']];
+		}
+		$messages[] = ['role' => 'user', 'content' => $user];
+
 		if ($provider === AiConfig::PROVIDER_ANTHROPIC) {
-			[$headers, $body] = $this->buildAnthropicRequest($endpoint, $apiKey, $model, $system, $user, $schema);
+			[$headers, $body] = $this->buildAnthropicRequest($endpoint, $apiKey, $model, $system, $messages, $schema);
 		} else {
-			[$headers, $body] = $this->buildOpenAiRequest($provider, $apiKey, $model, $system, $user, $schema, $schemaName);
+			[$headers, $body] = $this->buildOpenAiRequest($provider, $apiKey, $model, $system, $messages, $schema, $schemaName);
 		}
 
 		$response = $this->send($endpoint, $headers, $body, $allowLocal);
@@ -79,7 +85,7 @@ class AiClient {
 	/**
 	 * @return array{0: array<string, string>, 1: array<string, mixed>}
 	 */
-	private function buildAnthropicRequest(string $endpoint, string $apiKey, string $model, string $system, string $user, array $schema): array {
+	private function buildAnthropicRequest(string $endpoint, string $apiKey, string $model, string $system, array $messages, array $schema): array {
 		$headers = [
 			'Content-Type' => 'application/json',
 			'x-api-key' => $apiKey,
@@ -98,9 +104,7 @@ class AiClient {
 			'model' => $model,
 			'max_tokens' => self::MAX_TOKENS,
 			'system' => $system,
-			'messages' => [
-				['role' => 'user', 'content' => $user],
-			],
+			'messages' => $messages,
 			'output_config' => $outputConfig,
 		];
 
@@ -124,7 +128,7 @@ class AiClient {
 	/**
 	 * @return array{0: array<string, string>, 1: array<string, mixed>}
 	 */
-	private function buildOpenAiRequest(string $provider, string $apiKey, string $model, string $system, string $user, array $schema, string $schemaName): array {
+	private function buildOpenAiRequest(string $provider, string $apiKey, string $model, string $system, array $messages, array $schema, string $schemaName): array {
 		$headers = ['Content-Type' => 'application/json'];
 		if ($provider === AiConfig::PROVIDER_AZURE) {
 			$headers['api-key'] = $apiKey;
@@ -135,7 +139,7 @@ class AiClient {
 		$body = [
 			'messages' => [
 				['role' => 'system', 'content' => $system],
-				['role' => 'user', 'content' => $user],
+				...$messages,
 			],
 		];
 		if ($model !== '') {

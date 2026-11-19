@@ -108,8 +108,8 @@ class ApiController extends Controller {
 	#[NoAdminRequired]
 	#[UserRateLimit(limit: 30, period: 60)]
 	#[FrontpageRoute(verb: 'POST', url: '/api/message')]
-	public function message(string $text = '', ?string $timezone = null): JSONResponse {
-		return $this->respond(function (string $userId) use ($text, $timezone) {
+	public function message(string $text = '', ?string $timezone = null, array $history = []): JSONResponse {
+		return $this->respond(function (string $userId) use ($text, $timezone, $history) {
 			$tz = $this->userTimezone->get($userId, $timezone);
 			$result = $this->interpreter->interpret(
 				$text,
@@ -117,6 +117,7 @@ class ApiController extends Controller {
 				$this->timeFactory->now(),
 				$tz,
 				$this->eventManager->getRoutingCalendars($userId),
+				$history,
 			);
 
 			switch ($result['action']) {
@@ -166,6 +167,7 @@ class ApiController extends Controller {
 				default:
 					return [
 						'status' => 'unclear',
+						'usedCandidates' => $result['usedCandidates'] ?? false,
 						'reply' => $result['reply'],
 					];
 			}

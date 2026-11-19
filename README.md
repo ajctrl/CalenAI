@@ -41,7 +41,7 @@ In Nextcloud administration settings, open the AI section and find **CalenAI**. 
 
 ## Data sent to the AI provider
 
-CalenAI sends the input text, current time, and time zone to the configured provider. By default, it also sends titles and times for up to 20 recent events created through CalenAI. Administrators can limit that context to edit and delete requests. When automatic calendar selection is enabled, the provider also receives calendar names and the routing descriptions supplied by the user.
+CalenAI sends the conversation text from the current page (including previous messages and replies), current time, and time zone to the configured provider. By default, it also sends titles and times for up to 20 recent events created through CalenAI. Administrators can limit that context to edit and delete requests. When automatic calendar selection is enabled, the provider also receives calendar names and the routing descriptions supplied by the user.
 
 ## Update
 
